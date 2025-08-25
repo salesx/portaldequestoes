@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<Centro de Controle>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
