@@ -32,6 +32,13 @@
     <script type="text/babel">
         const { useState } = React;
 
+        // =================================================================
+        // IMPORTANTE: Insira sua chave de API do Google AI Studio aqui
+        // Obtenha sua chave em: https://aistudio.google.com/app/apikey
+        // =================================================================
+        const YOUR_API_KEY = "AIzaSyCSFgX8V5F9Mg472kZoRsr1tRlZngqFHhU";
+        // =================================================================
+
         // Função para chamar a API do Gemini e gerar questões
         async function generateQuestionsWithAI(topic, numQuestions, difficulty) {
           const systemPrompt = `Você é um assistente especialista em criar quizzes. Sua tarefa é gerar ${numQuestions} questões de múltipla escolha sobre um determinado tema, com um nível de dificuldade ${difficulty}.
@@ -41,7 +48,7 @@
           
           const userQuery = `Gere ${numQuestions} questões sobre o tema: "${topic}", no nível de dificuldade ${difficulty}.`;
 
-          const apiKey = ""; 
+          const apiKey = YOUR_API_KEY; 
           const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
 
           const payload = {
@@ -84,6 +91,9 @@
                 const result = await response.json();
                 const jsonText = result.candidates[0].content.parts[0].text;
                 return JSON.parse(jsonText);
+              } else {
+                // Se a resposta não for OK, lança um erro para ser pego pelo catch
+                throw new Error(`API retornou o status: ${response.status}`);
               }
             } catch (error) {
               console.error("Erro na tentativa de chamada da API:", error);
@@ -135,6 +145,10 @@
           const [isLoading, setIsLoading] = useState(false);
 
           const startQuiz = async () => {
+            if (YOUR_API_KEY === "COLE_SUA_CHAVE_DE_API_AQUI") {
+                setError("Erro de configuração: Por favor, insira uma chave de API válida no código.");
+                return;
+            }
             if (!topic.trim()) {
                 setError("Por favor, digite um tema.");
                 return;
