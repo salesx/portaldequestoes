@@ -224,32 +224,46 @@
                   const canvas = await html2canvas(reportElement, {
                       scale: 2, // Aumenta a resolução para melhor qualidade
                       useCORS: true,
-                      backgroundColor: '#ffffff',
+                      backgroundColor: '#ffffff'
                   });
 
                   const imgData = canvas.toDataURL('image/png');
-                  
-                  const pdf = new jsPDF('p', 'mm', 'a4');
-                  const pdfWidth = pdf.internal.pageSize.getWidth();
-                  const pdfHeight = pdf.internal.pageSize.getHeight();
-                  
                   const imgWidth = canvas.width;
                   const imgHeight = canvas.height;
 
-                  const ratio = imgWidth / imgHeight;
-                  let newImgWidth = pdfWidth - 20; // com margem de 10mm de cada lado
-                  let newImgHeight = newImgWidth / ratio;
+                  const pdf = new jsPDF({
+                      orientation: 'p',
+                      unit: 'mm',
+                      format: 'a4'
+                  });
+
+                  const pdfPageWidth = pdf.internal.pageSize.getWidth();
+                  const pdfPageHeight = pdf.internal.pageSize.getHeight();
+
+                  // Calculate the aspect ratio to maintain proportions
+                  const imgRatio = imgHeight / imgWidth;
                   
-                  // Se a imagem for muito alta, recalcula para caber na altura
-                  if (newImgHeight > pdfHeight - 20) {
-                      newImgHeight = pdfHeight - 20;
-                      newImgWidth = newImgHeight * ratio;
+                  // Set the image width to the PDF page width minus margins
+                  const pdfImgWidth = pdfPageWidth - 20; // 10mm margin on each side
+                  const pdfImgHeight = pdfImgWidth * imgRatio;
+
+                  let heightLeft = pdfImgHeight;
+                  let position = 0;
+                  const margin = 10;
+
+                  // Add the first part of the image to the first page
+                  pdf.addImage(imgData, 'PNG', margin, margin, pdfImgWidth, pdfImgHeight);
+                  heightLeft -= (pdfPageHeight - (margin * 2)); // Subtract the printable height of one page
+
+                  // Loop to add new pages if the content overflows
+                  while (heightLeft > 0) {
+                      position -= (pdfPageHeight - (margin * 2)); // Move the image's Y position up for the next page
+                      pdf.addPage();
+                      // Add the same image, but with a negative Y offset to show the next part
+                      pdf.addImage(imgData, 'PNG', margin, position + margin, pdfImgWidth, pdfImgHeight);
+                      heightLeft -= (pdfPageHeight - (margin * 2));
                   }
 
-                  const positionX = (pdfWidth - newImgWidth) / 2; // Centraliza
-                  const positionY = 10;
-                  
-                  pdf.addImage(imgData, 'PNG', positionX, positionY, newImgWidth, newImgHeight);
                   pdf.save(`relatorio-${topic.replace(/\s+/g, '-')}.pdf`);
 
               } catch (error) {
