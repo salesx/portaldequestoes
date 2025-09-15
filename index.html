@@ -333,7 +333,8 @@
                       position -= pdfPageHeight; // Desloca a posição Y para cima pela altura de uma página inteira
                       pdf.addPage();
                       pdf.addImage(imgData, 'PNG', margin, position + margin, contentWidth, totalPdfHeight);
-                      heightLeft -= (pdfPageHeight - margin);
+                      // CORREÇÃO: Usar a altura útil da página (descontando ambas as margens) para o cálculo
+                      heightLeft -= (pdfPageHeight - margin * 2);
                   }
 
                   pdf.save(`relatorio-${topic.replace(/\s+/g, '-')}.pdf`);
