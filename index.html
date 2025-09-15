@@ -286,59 +286,95 @@
             setError('');
             setQuestions([]);
           };
-
-          const handleDownloadPdf = async () => {
-              const { jsPDF } = window.jspdf;
-              const reportElement = document.getElementById("report-content");
-              if (!reportElement) return;
-
+          
+          // FUNÇÃO DE GERAR PDF ATUALIZADA
+          const handleDownloadPdf = () => {
               setIsDownloading(true);
-
               try {
-                  const canvas = await html2canvas(reportElement, { 
-                      scale: 2, 
-                      useCORS: true, 
-                      backgroundColor: '#ffffff' 
+                  const { jsPDF } = window.jspdf;
+                  const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+
+                  const margin = 15;
+                  const pageWidth = pdf.internal.pageSize.getWidth();
+                  const pageHeight = pdf.internal.pageSize.getHeight();
+                  const usableWidth = pageWidth - margin * 2;
+                  let y = margin + 5; // Posição Y inicial (com mais espaço no topo)
+
+                  const addText = (text, options, yOffset = 5) => {
+                      const splitText = pdf.splitTextToSize(text, usableWidth);
+                      const textHeight = pdf.getTextDimensions(splitText).h;
+
+                      if (y + textHeight > pageHeight - margin) {
+                          pdf.addPage();
+                          y = margin;
+                      }
+
+                      pdf.setFont(options.font || 'helvetica', options.style || 'normal');
+                      pdf.setFontSize(options.size || 10);
+                      pdf.setTextColor(options.color || '#333333');
+                      pdf.text(splitText, margin, y);
+                      y += textHeight + yOffset;
+                  };
+
+                  addText('Relatório de Desempenho', { size: 20, style: 'bold' }, 12);
+                  addText(`Tema: ${topic}`, { size: 12 }, 6);
+                  const scoreText = `Pontuação: ${score}/${questions.length} (${questions.length > 0 ? Math.round((score / questions.length) * 100) : 0}%)`;
+                  addText(scoreText, { size: 12 }, 15);
+
+                  questions.forEach((q, index) => {
+                      const userAnswer = userAnswers[index];
+                      const questionText = `${index + 1}. ${q.question}`;
+                      const yourAnswerText = `Sua resposta: ${userAnswer.answer}`;
+                      const correctAnswerText = `Resposta correta: ${q.answer}`;
+                      const explanationText = `Resumo: ${q.explanation}`;
+
+                      const estBlockHeight =
+                          (pdf.getTextDimensions(pdf.splitTextToSize(questionText, usableWidth)).h) +
+                          (pdf.getTextDimensions(pdf.splitTextToSize(yourAnswerText, usableWidth)).h) +
+                          (!userAnswer.isCorrect ? pdf.getTextDimensions(pdf.splitTextToSize(correctAnswerText, usableWidth)).h : 0) +
+                          (pdf.getTextDimensions(pdf.splitTextToSize(explanationText, usableWidth)).h) + 30; // Aumentei o padding
+
+                      if (y + estBlockHeight > pageHeight - margin) {
+                          pdf.addPage();
+                          y = margin;
+                      }
+                      
+                      if (index > 0) {
+                          pdf.setDrawColor(220, 220, 220);
+                          pdf.line(margin, y - 10, pageWidth - margin, y - 10);
+                      }
+                      
+                      // Número da questão em negrito
+                      pdf.setFont('helvetica', 'bold');
+                      pdf.setFontSize(12);
+                      const questionLines = pdf.splitTextToSize(`${index + 1}. ${q.question}`, usableWidth);
+                      addText(questionLines, { size: 12, style: 'bold' }, 8);
+
+                      const correctColor = '#16a34a';
+                      const incorrectColor = '#dc2626';
+
+                      addText('Sua resposta:', { size: 10, style: 'bold', color: userAnswer.isCorrect ? correctColor : incorrectColor }, 3);
+                      addText(userAnswer.answer, { size: 10, color: userAnswer.isCorrect ? correctColor : incorrectColor }, 6);
+                      
+                      if (!userAnswer.isCorrect) {
+                          addText('Resposta correta:', { size: 10, style: 'bold' }, 3);
+                          addText(q.answer, { size: 10 }, 6);
+                      }
+
+                      addText('Resumo:', { size: 10, style: 'bold' }, 3);
+                      addText(q.explanation, { size: 10 }, 20); // Mais espaço após a explicação
                   });
-                  
-                  const imgData = canvas.toDataURL('image/png');
-                  const pdf = new jsPDF({
-                      orientation: 'p',
-                      unit: 'mm',
-                      format: 'a4'
-                  });
 
-                  const margin = 10;
-                  const pdfPageWidth = pdf.internal.pageSize.getWidth();
-                  const pdfPageHeight = pdf.internal.pageSize.getHeight();
-                  
-                  const contentWidth = pdfPageWidth - margin * 2;
-
-                  const canvasWidth = canvas.width;
-                  const canvasHeight = canvas.height;
-                  const canvasAspectRatio = canvasHeight / canvasWidth;
-
-                  // Calcula a altura total que a imagem do conteúdo terá no PDF
-                  const totalPdfHeight = contentWidth * canvasAspectRatio;
-
-                  let heightLeft = totalPdfHeight;
-                  let position = 0; // A posição Y será ajustada dentro do loop
-
-                  // Adiciona a primeira página
-                  pdf.addImage(imgData, 'PNG', margin, position + margin, contentWidth, totalPdfHeight);
-                  heightLeft -= (pdfPageHeight - margin * 2);
-
-                  // Adiciona novas páginas se o conteúdo for maior
-                  while (heightLeft > 0) {
-                      position -= pdfPageHeight; // Desloca a posição Y para cima pela altura de uma página inteira
-                      pdf.addPage();
-                      pdf.addImage(imgData, 'PNG', margin, position + margin, contentWidth, totalPdfHeight);
-                      // CORREÇÃO: Usar a altura útil da página (descontando ambas as margens) para o cálculo
-                      heightLeft -= (pdfPageHeight - margin * 2);
+                  const pageCount = pdf.internal.getNumberOfPages();
+                  for (let i = 1; i <= pageCount; i++) {
+                      pdf.setPage(i);
+                      pdf.setFontSize(8);
+                      pdf.setTextColor(150, 150, 150);
+                      const footerText = `Página ${i} de ${pageCount} | Relatório gerado em: ${new Date().toLocaleString('pt-BR')}`;
+                      pdf.text(footerText, margin, pageHeight - 7);
                   }
 
                   pdf.save(`relatorio-${topic.replace(/\s+/g, '-')}.pdf`);
-
               } catch (error) {
                   console.error("Erro ao gerar PDF:", error);
                   alert("Desculpe, ocorreu um erro ao gerar o PDF.");
@@ -455,33 +491,56 @@
 
                     {gameState === 'report' && (
                         <div>
-                            <div id="report-content" className="text-left bg-white p-4">
-                              <h2 className="text-2xl md:text-3xl font-bold text-gray-800 mb-2 text-center">Relatório de Desempenho</h2>
-                              <p className="text-center text-gray-600 mb-1 truncate">Tema: <span className="font-semibold">{topic}</span></p>
-                              <p className="text-center text-gray-600 mb-6">Pontuação Final: <span className="font-bold">{score} / {questions.length}</span> ({questions.length > 0 ? Math.round((score / questions.length) * 100) : 0}%)</p>
-                              
-                              <div className="space-y-4">
-                                  {questions.map((q, index) => {
-                                      const userAnswer = userAnswers[index];
-                                      return (
-                                          <div key={index} className="p-4 rounded-lg bg-gray-50 border report-item">
-                                              <p className="font-semibold text-gray-800">{index + 1}. {q.question}</p>
-                                              <div className={`mt-2 flex items-center gap-2 ${userAnswer.isCorrect ? 'text-green-700' : 'text-red-700'}`}>
-                                                  {userAnswer.isCorrect ? <CheckIcon className="h-5 w-5"/> : <XIcon className="h-5 w-5"/>}
-                                                  <span>Sua resposta: {userAnswer.answer}</span>
-                                              </div>
-                                              {!userAnswer.isCorrect && (
-                                                  <p className="mt-1 text-gray-600 pl-7">Resposta correta: {q.answer}</p>
-                                              )}
-                                              <div className="mt-2 pt-2 border-t border-gray-200">
-                                                  <p className="text-sm text-gray-700"><span className="font-semibold">Resumo:</span> {q.explanation}</p>
-                                              </div>
-                                          </div>
-                                      );
-                                  })}
-                              </div>
+                            {/* Este container é usado para o layout na tela, mas não para o PDF */}
+                            <div id="report-content-for-display">
+                                <div className="bg-gray-100 p-6 rounded-t-lg">
+                                    <h2 className="text-3xl font-bold text-gray-800 text-center">Relatório de Desempenho</h2>
+                                    <div className="flex justify-between items-center mt-4 text-gray-600">
+                                        <div className="flex-1 min-w-0">
+                                            <span className="font-semibold">Tema:</span>
+                                            <span className="ml-2 truncate" title={topic}>{topic}</span>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="font-semibold">Pontuação:</span>
+                                            <span className="ml-2 font-bold text-xl text-blue-600">{score}/{questions.length}</span>
+                                            <span className="ml-1 text-sm">({questions.length > 0 ? Math.round((score / questions.length) * 100) : 0}%)</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="p-6 space-y-6">
+                                    {questions.map((q, index) => {
+                                        const userAnswer = userAnswers[index];
+                                        return (
+                                            <div key={index} className="p-5 rounded-lg border border-gray-200 shadow-sm report-item bg-white">
+                                                <p className="font-bold text-lg text-gray-800 mb-3">{index + 1}. {q.question}</p>
+                                                <div className={`flex items-start gap-3 p-3 rounded-md ${userAnswer.isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'} border`}>
+                                                    {userAnswer.isCorrect ? <CheckIcon className="h-5 w-5 text-green-600 mt-1 flex-shrink-0"/> : <XIcon className="h-5 w-5 text-red-600 mt-1 flex-shrink-0"/>}
+                                                    <div>
+                                                        <p className="font-semibold text-gray-700">Sua resposta:</p>
+                                                        <p className="text-gray-600">{userAnswer.answer}</p>
+                                                    </div>
+                                                </div>
+                                                {!userAnswer.isCorrect && (
+                                                    <div className="flex items-start gap-3 mt-2 p-3 rounded-md bg-gray-50 border border-gray-200">
+                                                        <CheckIcon className="h-5 w-5 text-gray-500 mt-1 flex-shrink-0"/>
+                                                        <div>
+                                                            <p className="font-semibold text-gray-700">Resposta correta:</p>
+                                                            <p className="text-gray-600">{q.answer}</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div className="mt-4 pt-3 border-t border-gray-200">
+                                                    <p className="text-sm text-gray-700"><span className="font-semibold">Resumo:</span> {q.explanation}</p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <div className="text-center text-xs text-gray-400 p-4 border-t border-gray-100">
+                                    <p>Relatório gerado em: {new Date().toLocaleString('pt-BR')}</p>
+                                    <p>Portal de Questões IA</p>
+                                </div>
                             </div>
-
                             <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
                                 <button onClick={handleDownloadPdf} disabled={isDownloading} className="px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition-colors disabled:bg-gray-400">
                                   {isDownloading ? 'Baixando...' : 'Baixar Relatório (PDF)'}
