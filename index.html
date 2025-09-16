@@ -5,50 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Portal de Questões com IA</title>
     
-    <!-- Carrega o Tailwind CSS para estilização -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Carrega as bibliotecas React e ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    
-    <!-- Carrega o Babel para transpilar o JSX em JavaScript no navegador -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-    <!-- Bibliotecas para gerar PDF -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
-        /* Estilo para a fonte e transições suaves */
-        body {
-            font-family: 'Inter', sans-serif;
-        }
+        body { font-family: 'Inter', sans-serif; }
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-        /* Estilo para evitar quebra de página dentro de um item do relatório ao imprimir/gerar pdf */
-        .report-item {
-            break-inside: avoid;
-        }
+        .report-item { break-inside: avoid; }
     </style>
 </head>
 <body class="bg-gray-100">
     
-    <!-- Onde a aplicação React será renderizada -->
     <div id="root"></div>
 
-    <!-- Script com o código da sua aplicação React -->
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
         // =================================================================
-        // IMPORTANTE: Insira sua chave de API do Google AI Studio aqui
-        // Obtenha sua chave em: https://aistudio.google.com/app/apikey
+        // CHAVE DE API (NÃO ALTERAR SE ESTIVER NO AMBIENTE CORRETO)
         // =================================================================
         const YOUR_API_KEY = "AIzaSyCSFgX8V5F9Mg472kZoRsr1tRlZngqFHhU";
         // =================================================================
 
-        // Função para converter arquivo em base64
+        // --- Funções da API e Utilitários ---
         const fileToBase64 = (file) => new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.readAsDataURL(file);
@@ -56,508 +38,400 @@
             reader.onerror = error => reject(error);
         });
 
-        // Função para chamar a API do Gemini e gerar questões
         async function generateQuestionsWithAI(config) {
-          const { topic, numQuestions, difficulty, fileData, mimeType } = config;
-
-          const systemPrompt = `Você é um assistente especialista em criar quizzes. Sua tarefa é gerar ${numQuestions} questões de múltipla escolha sobre o conteúdo fornecido, com um nível de dificuldade ${difficulty}.
-            As questões devem ser claras, objetivas e ter 4 opções de resposta, com apenas uma correta.
-            Para cada questão, inclua um campo 'explanation' com um breve resumo (1-2 frases) explicando por que a resposta correta está certa.
-            Responda SEMPRE no formato JSON solicitado, sem nenhuma outra formatação ou texto adicional.`;
-          
-          let userQuery;
-          const parts = [];
-
-          if (fileData && mimeType) {
-              userQuery = `Com base no conteúdo do arquivo fornecido, gere ${numQuestions} questões sobre ele, no nível de dificuldade ${difficulty}.`;
-              parts.push({ text: userQuery });
-              parts.push({ inlineData: { mimeType, data: fileData } });
-          } else {
-              userQuery = `Gere ${numQuestions} questões sobre o tema: "${topic}", no nível de dificuldade ${difficulty}.`;
-              parts.push({ text: userQuery });
-          }
-
-          const apiKey = YOUR_API_KEY; 
-          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-
-          const payload = {
-            contents: [{ parts }],
-            systemInstruction: {
-              parts: [{ text: systemPrompt }]
-            },
-            generationConfig: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: "ARRAY",
-                items: {
-                  type: "OBJECT",
-                  properties: {
-                    question: { type: "STRING" },
-                    options: {
-                      type: "ARRAY",
-                      items: { type: "STRING" }
-                    },
-                    answer: { type: "STRING" },
-                    explanation: { type: "STRING" }
-                  },
-                  required: ["question", "options", "answer", "explanation"]
-                }
-              }
+            const { topic, numQuestions, difficulty, fileData, mimeType } = config;
+            const difficultyPrompt = difficulty === 'Misto' ? 'MISTO, variando aleatoriamente entre Fácil, Médio e Difícil' : difficulty;
+            const systemPrompt = `Você é um especialista em criar quizzes. Gere ${numQuestions} questões de múltipla escolha sobre o conteúdo fornecido, com dificuldade ${difficultyPrompt}. As questões devem ter 4 opções, 1 correta, e um campo 'explanation' com um breve resumo. Responda APENAS com o JSON.`;
+            const parts = [];
+            if (fileData && mimeType) {
+                parts.push({ text: `Com base no arquivo, gere ${numQuestions} questões.` });
+                parts.push({ inlineData: { mimeType, data: fileData } });
+            } else {
+                parts.push({ text: `Gere ${numQuestions} questões sobre: "${topic}".` });
             }
-          };
-
-          let response;
-          let retries = 3;
-          let delay = 1000;
-          while (retries > 0) {
-            try {
-              response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-              });
-              if (response.ok) {
-                const result = await response.json();
-                if (result.candidates && result.candidates.length > 0) {
-                    const jsonText = result.candidates[0].content.parts[0].text;
-                    return JSON.parse(jsonText);
-                } else {
-                    throw new Error("Resposta da API inválida. A IA pode ter bloqueado o pedido.");
-                }
-              } else {
-                throw new Error(`API retornou o status: ${response.status}`);
-              }
-            } catch (error) {
-              console.error("Erro na tentativa de chamada da API:", error);
-            }
-            retries--;
-            if (retries > 0) {
-              await new Promise(resolve => setTimeout(resolve, delay));
-              delay *= 2;
-            }
-          }
-          throw new Error("Falha ao gerar questões após várias tentativas.");
+            const apiKey = YOUR_API_KEY;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const payload = { contents: [{ parts }], systemInstruction: { parts: [{ text: systemPrompt }] }, generationConfig: { responseMimeType: "application/json", responseSchema: { type: "ARRAY", items: { type: "OBJECT", properties: { question: { type: "STRING" }, options: { type: "ARRAY", items: { type: "STRING" } }, answer: { type: "STRING" }, explanation: { type: "STRING" } }, required: ["question", "options", "answer", "explanation"] } } } };
+            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!response.ok) throw new Error(`API retornou ${response.status}`);
+            const result = await response.json();
+            const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!jsonText) throw new Error("Resposta da API inválida.");
+            return JSON.parse(jsonText);
         }
-
 
         // --- Ícones ---
-        const CheckIcon = ({ className = "h-6 w-6 text-green-500" }) => (
-          <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-        );
-
-        const XIcon = ({ className = "h-6 w-6 text-red-500" }) => (
-          <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        );
+        const CheckIcon = ({ className = "h-6 w-6 text-green-500" }) => ( <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg> );
+        const XIcon = ({ className = "h-6 w-6 text-red-500" }) => ( <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg> );
+        const FileIcon = () => ( <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg> );
+        const LoadingSpinner = ({text}) => ( <div className="flex flex-col items-center justify-center space-y-4"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div><p className="text-gray-600 font-medium">{text || "Aguarde..."}</p></div> );
         
-        const FileIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>);
-        
-        const LoadingSpinner = ({text}) => (
-            <div className="flex flex-col items-center justify-center space-y-4">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                <p className="text-gray-600 font-medium">{text || "Aguarde..."}</p>
-            </div>
-        );
-
-
         // --- Componente Principal ---
         function App() {
-          const [gameState, setGameState] = useState('start');
-          const [inputType, setInputType] = useState('topic'); // 'topic' ou 'file'
-          const [topic, setTopic] = useState('');
-          const [file, setFile] = useState(null);
-          const [difficulty, setDifficulty] = useState('Médio');
-          const [numQuestions, setNumQuestions] = useState(5);
-          const [questions, setQuestions] = useState([]);
-          const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-          const [userAnswers, setUserAnswers] = useState({});
-          const [score, setScore] = useState(0);
-          const [selectedAnswer, setSelectedAnswer] = useState(null);
-          const [isAnswered, setIsAnswered] = useState(false);
-          const [error, setError] = useState('');
-          const [isLoading, setIsLoading] = useState(false);
-          const [loadingText, setLoadingText] = useState('');
-          const [isDownloading, setIsDownloading] = useState(false);
-          
-          const handleFileChange = (e) => {
-            const selectedFile = e.target.files[0];
-            if (selectedFile) {
-                // Limite de 10MB para o arquivo
-                if (selectedFile.size > 10 * 1024 * 1024) {
-                    setError("O arquivo é muito grande. O limite é de 10MB.");
-                    setFile(null);
+            const [gameState, setGameState] = useState('start');
+            const [quizMode, setQuizMode] = useState('practice');
+            const [inputType, setInputType] = useState('topic');
+            const [topic, setTopic] = useState('');
+            const [file, setFile] = useState(null);
+            const [difficulty, setDifficulty] = useState('Médio');
+            const [numQuestions, setNumQuestions] = useState(5);
+            const [timerMinutes, setTimerMinutes] = useState(10);
+            const [timer, setTimer] = useState(0);
+            const [questions, setQuestions] = useState([]);
+            const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+            const [userAnswers, setUserAnswers] = useState({});
+            const [score, setScore] = useState(0);
+            const [selectedAnswer, setSelectedAnswer] = useState(null);
+            const [isAnswered, setIsAnswered] = useState(false);
+            const [error, setError] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [loadingText, setLoadingText] = useState('');
+            const [isDownloading, setIsDownloading] = useState(false);
+
+            useEffect(() => {
+                if (gameState === 'playing' && quizMode === 'test') {
+                    const interval = setInterval(() => {
+                        setTimer(prev => {
+                            if (prev <= 1) {
+                                clearInterval(interval);
+                                finishTest();
+                                return 0;
+                            }
+                            return prev - 1;
+                        });
+                    }, 1000);
+                    return () => clearInterval(interval);
+                }
+            }, [gameState, quizMode]);
+
+            const startQuiz = async () => {
+                let config = { numQuestions, difficulty };
+                let requestTopic = 'do arquivo enviado';
+
+                if (inputType === 'topic') {
+                    if (!topic.trim()) { setError("Por favor, digite um tema."); return; }
+                    config.topic = topic; 
+                    requestTopic = topic;
                 } else {
-                    setError('');
-                    setFile(selectedFile);
+                    if (!file) { setError("Por favor, selecione um arquivo."); return; }
+                    try {
+                        const fileData = await fileToBase64(file);
+                        config.fileData = fileData; 
+                        config.mimeType = file.type; 
+                        requestTopic = file.name;
+                    } catch(e) {
+                        setError("Erro ao processar o arquivo.");
+                        return;
+                    }
                 }
-            }
-          };
 
-          const startQuiz = async () => {
-            if (YOUR_API_KEY === "COLE_SUA_CHAVE_DE_API_AQUI") {
-                setError("Erro: Por favor, insira uma chave de API válida no código.");
-                return;
-            }
-            
-            let config = { numQuestions, difficulty };
-            let requestTopic = 'do arquivo enviado';
-
-            if (inputType === 'topic') {
-                if (!topic.trim()) {
-                    setError("Por favor, digite um tema.");
-                    return;
-                }
-                config.topic = topic;
-                requestTopic = topic;
-            } else { // inputType === 'file'
-                if (!file) {
-                    setError("Por favor, selecione um arquivo.");
-                    return;
-                }
-                setIsLoading(true);
-                setLoadingText("Processando arquivo...");
+                setIsLoading(true); 
+                setLoadingText("Gerando questões..."); 
+                setError('');
                 try {
-                    const fileData = await fileToBase64(file);
-                    config.fileData = fileData;
-                    config.mimeType = file.type;
-                    requestTopic = file.name;
+                    const questionsFromAI = await generateQuestionsWithAI(config);
+                    if (questionsFromAI && questionsFromAI.length > 0) {
+                        setQuestions(questionsFromAI); 
+                        setTopic(requestTopic); 
+                        setGameState('playing'); 
+                        setCurrentQuestionIndex(0); 
+                        setUserAnswers({}); 
+                        setScore(0); 
+                        setSelectedAnswer(null); 
+                        setIsAnswered(false);
+                        if (quizMode === 'test') { 
+                            setTimer(timerMinutes * 60); 
+                        }
+                    } else { 
+                        throw new Error("A IA não retornou questões válidas."); 
+                    }
                 } catch (err) {
-                    setError("Erro ao ler o arquivo. Tente novamente.");
+                    setError(`Desculpe, ocorreu um erro ao gerar as questões.`); 
+                    setGameState('start');
+                } finally {
                     setIsLoading(false);
-                    return;
                 }
-            }
+            };
+
+            const finishTest = () => {
+                let finalScore = 0;
+                const finalUserAnswers = {};
+                questions.forEach((q, index) => {
+                    const userAnswer = userAnswers[index];
+                    const isCorrect = userAnswer && userAnswer.answer === q.answer;
+                    if (isCorrect) finalScore++;
+                    finalUserAnswers[index] = {
+                        answer: userAnswer ? userAnswer.answer : "Não respondida",
+                        isCorrect: isCorrect
+                    };
+                });
+                setScore(finalScore);
+                setUserAnswers(finalUserAnswers);
+                setGameState('finished');
+            };
             
-            setIsLoading(true);
-            setLoadingText("Gerando questões com IA...");
-            setError('');
+            const handleAnswerSelect = (option) => { 
+                if (quizMode === 'practice' && isAnswered) return; 
+                setSelectedAnswer(option); 
+                const newAnswers = { ...userAnswers, [currentQuestionIndex]: { answer: option } }; 
+                setUserAnswers(newAnswers); 
+                if (quizMode === 'practice') { 
+                    setIsAnswered(true); 
+                    const isCorrect = option === questions[currentQuestionIndex].answer; 
+                    if (isCorrect) setScore(prevScore => prevScore + 1); 
+                } 
+            };
+            
+            const handleNextQuestion = () => { 
+                if (currentQuestionIndex < questions.length - 1) { 
+                    setCurrentQuestionIndex(prevIndex => prevIndex + 1); 
+                    setSelectedAnswer(userAnswers[currentQuestionIndex + 1]?.answer || null); 
+                    setIsAnswered(false); 
+                } else { 
+                    if (quizMode === 'practice') setGameState('finished'); 
+                } 
+            };
+            
+            const restartQuiz = () => { window.location.href = window.location.pathname; };
+            
+            const handleDownloadPdf = () => {
+                setIsDownloading(true);
+                try {
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
 
-            try {
-                const questionsFromAI = await generateQuestionsWithAI(config);
-                if (questionsFromAI && questionsFromAI.length > 0) {
-                    setQuestions(questionsFromAI);
-                    setTopic(requestTopic); // Armazena o tema ou nome do arquivo para o relatório
-                    setGameState('playing');
-                    setCurrentQuestionIndex(0);
-                    setUserAnswers({});
-                    setScore(0);
-                    setSelectedAnswer(null);
-                    setIsAnswered(false);
-                } else {
-                    throw new Error("A IA não retornou questões válidas.");
+                    const margin = 15;
+                    const pageWidth = pdf.internal.pageSize.getWidth();
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    const usableWidth = pageWidth - margin * 2;
+                    let y = margin + 5; 
+
+                    const addText = (text, options, yOffset = 5) => {
+                        const splitText = pdf.splitTextToSize(text, usableWidth);
+                        const textHeight = pdf.getTextDimensions(splitText).h;
+
+                        if (y + textHeight > pageHeight - margin) {
+                            pdf.addPage();
+                            y = margin;
+                        }
+
+                        pdf.setFont(options.font || 'helvetica', options.style || 'normal');
+                        pdf.setFontSize(options.size || 10);
+                        pdf.setTextColor(options.color || '#333333');
+                        pdf.text(splitText, margin, y);
+                        y += textHeight + yOffset;
+                    };
+
+                    addText('Relatório de Desempenho', { size: 20, style: 'bold' }, 12);
+                    addText(`Tema: ${topic}`, { size: 12 }, 6);
+                    const scoreText = `Pontuação: ${score}/${questions.length} (${questions.length > 0 ? Math.round((score / questions.length) * 100) : 0}%)`;
+                    addText(scoreText, { size: 12 }, 15);
+
+                    questions.forEach((q, index) => {
+                        const userAnswer = userAnswers[index];
+                        const questionText = `${index + 1}. ${q.question}`;
+                        const yourAnswerText = `Sua resposta: ${userAnswer.answer}`;
+                        const correctAnswerText = `Resposta correta: ${q.answer}`;
+                        const explanationText = `Resumo: ${q.explanation}`;
+
+                        const estBlockHeight =
+                            (pdf.getTextDimensions(pdf.splitTextToSize(questionText, usableWidth)).h) +
+                            (pdf.getTextDimensions(pdf.splitTextToSize(yourAnswerText, usableWidth)).h) +
+                            (!userAnswer.isCorrect ? pdf.getTextDimensions(pdf.splitTextToSize(correctAnswerText, usableWidth)).h : 0) +
+                            (pdf.getTextDimensions(pdf.splitTextToSize(explanationText, usableWidth)).h) + 30;
+
+                        if (y + estBlockHeight > pageHeight - margin) {
+                            pdf.addPage();
+                            y = margin;
+                        }
+                        
+                        if (index > 0) {
+                            pdf.setDrawColor(220, 220, 220);
+                            pdf.line(margin, y - 10, pageWidth - margin, y - 10);
+                        }
+                        
+                        pdf.setFont('helvetica', 'bold');
+                        pdf.setFontSize(12);
+                        const questionLines = pdf.splitTextToSize(`${index + 1}. ${q.question}`, usableWidth);
+                        addText(questionLines, { size: 12, style: 'bold' }, 8);
+
+                        const correctColor = '#16a34a';
+                        const incorrectColor = '#dc2626';
+
+                        addText('Sua resposta:', { size: 10, style: 'bold', color: userAnswer.isCorrect ? correctColor : incorrectColor }, 3);
+                        addText(userAnswer.answer, { size: 10, color: userAnswer.isCorrect ? correctColor : incorrectColor }, 6);
+                        
+                        if (!userAnswer.isCorrect) {
+                            addText('Resposta correta:', { size: 10, style: 'bold' }, 3);
+                            addText(q.answer, { size: 10 }, 6);
+                        }
+
+                        addText('Resumo:', { size: 10, style: 'bold' }, 3);
+                        addText(q.explanation, { size: 10 }, 20);
+                    });
+
+                    const pageCount = pdf.internal.getNumberOfPages();
+                    for (let i = 1; i <= pageCount; i++) {
+                        pdf.setPage(i);
+                        pdf.setFontSize(8);
+                        pdf.setTextColor(150, 150, 150);
+                        const footerText = `Página ${i} de ${pageCount} | Relatório gerado em: ${new Date().toLocaleString('pt-BR')}`;
+                        pdf.text(footerText, margin, pageHeight - 7);
+                    }
+
+                    pdf.save(`relatorio-${topic.replace(/\s+/g, '-')}.pdf`);
+                } catch (error) {
+                    console.error("Erro ao gerar PDF:", error);
+                    alert("Desculpe, ocorreu um erro ao gerar o PDF.");
+                } finally {
+                    setIsDownloading(false);
                 }
-            } catch (err) {
-                console.error(err);
-                setError(`Desculpe, ocorreu um erro ao gerar as questões sobre "${requestTopic}". A IA pode não conseguir processar este conteúdo. Tente novamente.`);
-                setGameState('start');
-            } finally {
-                setIsLoading(false);
-                setLoadingText('');
-            }
-          };
-          
-          const handleAnswerSelect = (option) => {
-            if (isAnswered) return;
-            setSelectedAnswer(option);
-            setIsAnswered(true);
-            const currentQuestion = questions[currentQuestionIndex];
-            const isCorrect = option === currentQuestion.answer;
-            setUserAnswers({ ...userAnswers, [currentQuestionIndex]: { answer: option, isCorrect } });
-            if (isCorrect) setScore(prevScore => prevScore + 1);
-          };
+            };
 
-          const handleNextQuestion = () => {
-            if (currentQuestionIndex < questions.length - 1) {
-              setCurrentQuestionIndex(prevIndex => prevIndex + 1);
-              setSelectedAnswer(null);
-              setIsAnswered(false);
-            } else {
-              setGameState('finished');
-            }
-          };
 
-          const restartQuiz = () => {
-            setGameState('start');
-            setTopic('');
-            setFile(null);
-            setError('');
-            setQuestions([]);
-          };
-          
-          // FUNÇÃO DE GERAR PDF ATUALIZADA
-          const handleDownloadPdf = () => {
-              setIsDownloading(true);
-              try {
-                  const { jsPDF } = window.jspdf;
-                  const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-
-                  const margin = 15;
-                  const pageWidth = pdf.internal.pageSize.getWidth();
-                  const pageHeight = pdf.internal.pageSize.getHeight();
-                  const usableWidth = pageWidth - margin * 2;
-                  let y = margin + 5; // Posição Y inicial (com mais espaço no topo)
-
-                  const addText = (text, options, yOffset = 5) => {
-                      const splitText = pdf.splitTextToSize(text, usableWidth);
-                      const textHeight = pdf.getTextDimensions(splitText).h;
-
-                      if (y + textHeight > pageHeight - margin) {
-                          pdf.addPage();
-                          y = margin;
-                      }
-
-                      pdf.setFont(options.font || 'helvetica', options.style || 'normal');
-                      pdf.setFontSize(options.size || 10);
-                      pdf.setTextColor(options.color || '#333333');
-                      pdf.text(splitText, margin, y);
-                      y += textHeight + yOffset;
-                  };
-
-                  addText('Relatório de Desempenho', { size: 20, style: 'bold' }, 12);
-                  addText(`Tema: ${topic}`, { size: 12 }, 6);
-                  const scoreText = `Pontuação: ${score}/${questions.length} (${questions.length > 0 ? Math.round((score / questions.length) * 100) : 0}%)`;
-                  addText(scoreText, { size: 12 }, 15);
-
-                  questions.forEach((q, index) => {
-                      const userAnswer = userAnswers[index];
-                      const questionText = `${index + 1}. ${q.question}`;
-                      const yourAnswerText = `Sua resposta: ${userAnswer.answer}`;
-                      const correctAnswerText = `Resposta correta: ${q.answer}`;
-                      const explanationText = `Resumo: ${q.explanation}`;
-
-                      const estBlockHeight =
-                          (pdf.getTextDimensions(pdf.splitTextToSize(questionText, usableWidth)).h) +
-                          (pdf.getTextDimensions(pdf.splitTextToSize(yourAnswerText, usableWidth)).h) +
-                          (!userAnswer.isCorrect ? pdf.getTextDimensions(pdf.splitTextToSize(correctAnswerText, usableWidth)).h : 0) +
-                          (pdf.getTextDimensions(pdf.splitTextToSize(explanationText, usableWidth)).h) + 30; // Aumentei o padding
-
-                      if (y + estBlockHeight > pageHeight - margin) {
-                          pdf.addPage();
-                          y = margin;
-                      }
-                      
-                      if (index > 0) {
-                          pdf.setDrawColor(220, 220, 220);
-                          pdf.line(margin, y - 10, pageWidth - margin, y - 10);
-                      }
-                      
-                      // Número da questão em negrito
-                      pdf.setFont('helvetica', 'bold');
-                      pdf.setFontSize(12);
-                      const questionLines = pdf.splitTextToSize(`${index + 1}. ${q.question}`, usableWidth);
-                      addText(questionLines, { size: 12, style: 'bold' }, 8);
-
-                      const correctColor = '#16a34a';
-                      const incorrectColor = '#dc2626';
-
-                      addText('Sua resposta:', { size: 10, style: 'bold', color: userAnswer.isCorrect ? correctColor : incorrectColor }, 3);
-                      addText(userAnswer.answer, { size: 10, color: userAnswer.isCorrect ? correctColor : incorrectColor }, 6);
-                      
-                      if (!userAnswer.isCorrect) {
-                          addText('Resposta correta:', { size: 10, style: 'bold' }, 3);
-                          addText(q.answer, { size: 10 }, 6);
-                      }
-
-                      addText('Resumo:', { size: 10, style: 'bold' }, 3);
-                      addText(q.explanation, { size: 10 }, 20); // Mais espaço após a explicação
-                  });
-
-                  const pageCount = pdf.internal.getNumberOfPages();
-                  for (let i = 1; i <= pageCount; i++) {
-                      pdf.setPage(i);
-                      pdf.setFontSize(8);
-                      pdf.setTextColor(150, 150, 150);
-                      const footerText = `Página ${i} de ${pageCount} | Relatório gerado em: ${new Date().toLocaleString('pt-BR')}`;
-                      pdf.text(footerText, margin, pageHeight - 7);
-                  }
-
-                  pdf.save(`relatorio-${topic.replace(/\s+/g, '-')}.pdf`);
-              } catch (error) {
-                  console.error("Erro ao gerar PDF:", error);
-                  alert("Desculpe, ocorreu um erro ao gerar o PDF.");
-              } finally {
-                  setIsDownloading(false);
-              }
-          };
-          
-          const getButtonClass = (option) => {
-            if (!isAnswered) return "bg-white hover:bg-blue-100 text-blue-800";
-            const currentQuestion = questions[currentQuestionIndex];
-            if (option === currentQuestion.answer) return "bg-green-200 text-green-800 border-green-500";
-            if (option === selectedAnswer) return "bg-red-200 text-red-800 border-red-500";
-            return "bg-white text-blue-800 opacity-60";
-          };
-
-          return (
-            <div className="min-h-screen font-sans flex items-center justify-center p-4">
-              <div className="w-full max-w-2xl mx-auto bg-white rounded-2xl shadow-lg p-6 md:p-8 transition-all duration-500">
-                
-                {isLoading ? <LoadingSpinner text={loadingText} /> : (
-                  <>
-                    {gameState === 'start' && (
-                      <div className="text-center">
-                        <h1 className="text-3xl md:text-4xl font-bold text-gray-800 mb-2">Portal de Questões IA</h1>
-                        <p className="text-gray-600 mb-6">Gere um quiz a partir de um tema ou do upload de um arquivo.</p>
-                        
-                        {/* Abas para escolher o tipo de entrada */}
-                        <div className="flex border-b mb-4">
-                            <button onClick={() => setInputType('topic')} className={`flex-1 py-2 font-semibold ${inputType === 'topic' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Digitar Tema</button>
-                            <button onClick={() => setInputType('file')} className={`flex-1 py-2 font-semibold ${inputType === 'file' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Enviar Arquivo</button>
-                        </div>
-                        
-                        {/* Conteúdo das abas */}
-                        {inputType === 'topic' ? (
-                          <div className="mb-4">
-                            <input type="text" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Digite o tema aqui..." className="w-full p-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition" />
-                          </div>
-                        ) : (
-                          <div className="mb-4">
-                             <label htmlFor="file-upload" className="relative cursor-pointer w-full p-3 border-2 border-dashed border-gray-300 rounded-lg flex justify-center items-center hover:border-blue-500 transition">
-                                <FileIcon />
-                                <span className="text-gray-600">{file ? file.name : 'Clique para escolher um arquivo'}</span>
-                             </label>
-                             <input id="file-upload" type="file" className="sr-only" onChange={handleFileChange} accept="application/pdf,image/png,image/jpeg,image/webp" />
-                             <p className="text-xs text-gray-500 mt-1">Formatos suportados: PDF, PNG, JPG, WEBP. (Máx 10MB)</p>
-                             {file && <button onClick={() => setFile(null)} className="mt-2 text-red-500 text-sm hover:underline">Remover arquivo</button>}
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 text-left">
+            return (
+                <div className="min-h-screen font-sans flex items-center justify-center p-4">
+                  <div className="w-full max-w-3xl mx-auto bg-white rounded-2xl shadow-lg p-6 md:p-8 transition-all duration-500">
+                    
+                    {isLoading ? <LoadingSpinner text={loadingText} /> : (
+                      <>
+                        {gameState === 'start' && (
+                          <div className="text-center">
+                            <h1 className="text-3xl md:text-4xl font-bold text-gray-800 mb-2">Portal de Questões IA</h1>
+                            <p className="text-gray-600 mb-6">Pratique ou teste seus conhecimentos.</p>
+                            
+                            <div className="grid grid-cols-2 gap-2 bg-gray-200 p-1 rounded-lg mb-6">
+                                <button onClick={() => setQuizMode('practice')} className={`py-2 px-4 font-semibold rounded-md ${quizMode === 'practice' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>Prática</button>
+                                <button onClick={() => setQuizMode('test')} className={`py-2 px-4 font-semibold rounded-md ${quizMode === 'test' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>Prova</button>
+                            </div>
+                            
                             <div>
-                                <label htmlFor="difficulty" className="block text-sm font-medium text-gray-700 mb-1">Nível de Dificuldade</label>
-                                <select id="difficulty" value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="w-full p-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition">
-                                    <option>Fácil</option>
-                                    <option>Médio</option>
-                                    <option>Difícil</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label htmlFor="numQuestions" className="block text-sm font-medium text-gray-700 mb-1">Nº de Questões</label>
-                                <input type="number" id="numQuestions" value={numQuestions} onChange={(e) => setNumQuestions(e.target.value)} min="1" max="10" className="w-full p-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition" />
-                            </div>
-                        </div>
-
-                        <button onClick={startQuiz} disabled={isLoading} className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors">Gerar Questões</button>
-                        
-                        <p className="text-xs text-gray-400 mt-4">As questões são geradas por inteligência artificial e podem conter imprecisões.</p>
-                        {error && <p className="text-red-500 mt-4 font-medium">{error}</p>}
-                      </div>
-                    )}
-
-                    {gameState === 'playing' && questions.length > 0 && (
-                      <div>
-                        <div className="flex justify-between items-center mb-4">
-                          <p className="text-sm text-gray-500">Questão {currentQuestionIndex + 1} de {questions.length}</p>
-                          <button onClick={restartQuiz} className="text-sm text-gray-500 hover:text-blue-600 font-semibold transition-colors">Voltar ao Início</button>
-                        </div>
-                        <h2 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6">{questions[currentQuestionIndex].question}</h2>
-                        <div className="space-y-3">
-                          {questions[currentQuestionIndex].options.map((option, index) => (
-                            <button key={index} onClick={() => handleAnswerSelect(option)} disabled={isAnswered} className={`w-full text-left p-4 font-medium rounded-lg border-2 transition-all duration-300 flex justify-between items-center ${getButtonClass(option)}`}>
-                              <span>{option}</span>
-                              {isAnswered && option === selectedAnswer && option === questions[currentQuestionIndex].answer && <CheckIcon />}
-                              {isAnswered && option === selectedAnswer && option !== questions[currentQuestionIndex].answer && <XIcon />}
-                            </button>
-                          ))}
-                        </div>
-                        {isAnswered && (
-                          <div className="mt-6 text-center">
-                            <div className="bg-gray-100 p-4 rounded-lg text-left mb-6">
-                                <h3 className="font-bold text-gray-700 mb-1">Resumo:</h3>
-                                <p className="text-gray-600">{questions[currentQuestionIndex].explanation}</p>
-                            </div>
-                             <button onClick={handleNextQuestion} className="w-full sm:w-auto px-8 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition-colors">
-                                {currentQuestionIndex < questions.length - 1 ? 'Próxima Questão' : 'Ver Resultado'}
-                              </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {gameState === 'finished' && (
-                      <div className="text-center">
-                        <h2 className="text-3xl font-bold text-gray-800 mb-3">Quiz Finalizado!</h2>
-                        <p className="text-xl text-gray-600 mb-6">Você acertou <span className="font-bold text-blue-600">{score}</span> de <span className="font-bold text-blue-600">{questions.length}</span> questões.</p>
-                        <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
-                            <button onClick={startQuiz} className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors">Gerar Novas Questões</button>
-                            <button onClick={() => setGameState('report')} className="px-6 py-3 bg-gray-700 text-white font-semibold rounded-lg shadow-md hover:bg-gray-800 transition-colors">Ver Relatório</button>
-                            <button onClick={restartQuiz} className="px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-lg shadow-md hover:bg-gray-300 transition-colors">Voltar ao Início</button>
-                        </div>
-                      </div>
-                    )}
-
-                    {gameState === 'report' && (
-                        <div>
-                            {/* Este container é usado para o layout na tela, mas não para o PDF */}
-                            <div id="report-content-for-display">
-                                <div className="bg-gray-100 p-6 rounded-t-lg">
-                                    <h2 className="text-3xl font-bold text-gray-800 text-center">Relatório de Desempenho</h2>
-                                    <div className="flex justify-between items-center mt-4 text-gray-600">
-                                        <div className="flex-1 min-w-0">
-                                            <span className="font-semibold">Tema:</span>
-                                            <span className="ml-2 truncate" title={topic}>{topic}</span>
+                                <div className="flex border-b mb-4">
+                                    <button onClick={() => setInputType('topic')} className={`flex-1 py-2 font-semibold ${inputType === 'topic' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Digitar Tema</button>
+                                    <button onClick={() => setInputType('file')} className={`flex-1 py-2 font-semibold ${inputType === 'file' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Enviar Arquivo</button>
+                                </div>
+                                {inputType === 'topic' ? ( <div className="mb-4"><input type="text" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Digite o tema aqui..." className="w-full p-3 border-2 rounded-lg" /></div> ) 
+                                : ( <div className="mb-4"><label htmlFor="file-upload" className="cursor-pointer w-full p-3 border-2 border-dashed rounded-lg flex justify-center items-center"><FileIcon /><span className="text-gray-600">{file ? file.name : 'Clique para escolher um arquivo'}</span></label><input id="file-upload" type="file" className="sr-only" onChange={(e) => setFile(e.target.files[0])} /></div> )}
+                                <div className={`grid grid-cols-1 sm:grid-cols-${quizMode === 'practice' ? 2 : 3} gap-4 mb-6 text-left`}>
+                                    <div>
+                                        <label className="block text-sm font-medium">Dificuldade</label>
+                                        <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="w-full p-3 border-2 rounded-lg">
+                                            <option>Fácil</option><option>Médio</option><option>Difícil</option><option>Misto</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium">Nº de Questões</label>
+                                        <input type="number" value={numQuestions} onChange={(e) => setNumQuestions(e.target.value)} min="1" max="20" className="w-full p-3 border-2 rounded-lg" />
+                                    </div>
+                                    {quizMode === 'test' && (
+                                        <div>
+                                            <label className="block text-sm font-medium">Tempo (min)</label>
+                                            <input type="number" value={timerMinutes} onChange={(e) => setTimerMinutes(e.target.value)} min="1" max="120" className="w-full p-3 border-2 rounded-lg" />
                                         </div>
-                                        <div className="text-right">
-                                            <span className="font-semibold">Pontuação:</span>
-                                            <span className="ml-2 font-bold text-xl text-blue-600">{score}/{questions.length}</span>
-                                            <span className="ml-1 text-sm">({questions.length > 0 ? Math.round((score / questions.length) * 100) : 0}%)</span>
+                                    )}
+                                </div>
+                                <button onClick={startQuiz} className="w-full py-3 bg-blue-600 text-white font-semibold rounded-lg">Iniciar</button>
+                            </div>
+                            
+                            {error && <p className="text-red-500 mt-4">{error}</p>}
+                          </div>
+                        )}
+                        
+                        {gameState === 'playing' && questions.length > 0 && (
+                          <div>
+                            <div className="flex justify-between items-center mb-4">
+                              <p className="text-sm text-gray-500">Questão {currentQuestionIndex + 1} de {questions.length}</p>
+                              {quizMode === 'test' && <div className="text-lg font-bold text-red-600">{Math.floor(timer/60)}:{(timer % 60).toString().padStart(2, '0')}</div>}
+                              <button onClick={restartQuiz} className="text-sm text-gray-500 hover:text-blue-600">Sair</button>
+                            </div>
+                            <h2 className="text-xl md:text-2xl font-semibold text-gray-800 mb-6 min-h-[100px]">{questions[currentQuestionIndex].question}</h2>
+                            <div className="space-y-3">
+                              {questions[currentQuestionIndex].options.map((option, index) => {
+                                let buttonClass = "bg-white hover:bg-blue-100 text-blue-800";
+                                if(quizMode === 'practice'){
+                                    if (isAnswered) {
+                                        if(option === questions[currentQuestionIndex].answer) buttonClass="bg-green-200 text-green-800";
+                                        else if (option === selectedAnswer) buttonClass="bg-red-200 text-red-800";
+                                        else buttonClass="bg-white text-blue-800 opacity-60";
+                                    }
+                                } else { if(selectedAnswer === option) buttonClass="bg-blue-200 text-blue-900"; }
+                                return (<button key={index} onClick={() => handleAnswerSelect(option)} disabled={quizMode==='practice' && isAnswered} className={`w-full text-left p-4 font-medium rounded-lg border-2 transition-all ${buttonClass}`}><span>{option}</span></button>);
+                              })}
+                            </div>
+                            {quizMode === 'practice' && isAnswered && (<div className="mt-6 text-center"><div className="bg-gray-100 p-4 rounded-lg text-left mb-6"><h3 className="font-bold">Resumo:</h3><p>{questions[currentQuestionIndex].explanation}</p></div><button onClick={handleNextQuestion} className="w-full sm:w-auto px-8 py-3 bg-green-600 text-white rounded-lg">{currentQuestionIndex < questions.length - 1 ? 'Próxima' : 'Resultado'}</button></div>)}
+                            {quizMode === 'test' && (<div className="mt-8"><div className="flex flex-wrap justify-center gap-2 mb-6">{questions.map((_, index) => (<button key={index} onClick={() => { setCurrentQuestionIndex(index); setSelectedAnswer(userAnswers[index]?.answer || null); }} className={`h-10 w-10 font-semibold rounded-md ${currentQuestionIndex === index ? 'bg-blue-600 text-white' : userAnswers[index] ? 'bg-blue-200' : 'bg-gray-200'}`}>{index + 1}</button>))}</div><div className="flex justify-between"><button onClick={() => { if(currentQuestionIndex > 0) { setCurrentQuestionIndex(i => i-1); setSelectedAnswer(userAnswers[currentQuestionIndex-1]?.answer || null);}}} disabled={currentQuestionIndex === 0} className="px-6 py-2 bg-gray-300 rounded-lg disabled:opacity-50">Anterior</button><button onClick={finishTest} className="px-6 py-2 bg-green-600 text-white rounded-lg">Finalizar</button><button onClick={handleNextQuestion} disabled={currentQuestionIndex === questions.length - 1} className="px-6 py-2 bg-gray-300 rounded-lg disabled:opacity-50">Próxima</button></div></div>)}
+                          </div>
+                        )}
+                        {gameState === 'finished' && (
+                          <div className="text-center">
+                            <h2 className="text-3xl font-bold mb-3">Finalizado!</h2>
+                            <p className="text-xl mb-6">Você acertou <span className="font-bold text-blue-600">{score}</span> de <span className="font-bold">{questions.length}</span>.</p>
+                            <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3"><button onClick={() => setGameState('report')} className="px-6 py-3 bg-gray-700 text-white rounded-lg">Ver Relatório</button><button onClick={restartQuiz} className="px-6 py-3 bg-gray-200 text-gray-800 rounded-lg">Voltar ao Início</button></div>
+                          </div>
+                        )}
+                        {gameState === 'report' && (
+                           <div>
+                                <div id="report-content-for-display">
+                                    <div className="bg-gray-100 p-6 rounded-t-lg">
+                                        <h2 className="text-3xl font-bold text-gray-800 text-center">Relatório de Desempenho</h2>
+                                        <div className="flex justify-between items-center mt-4 text-gray-600">
+                                            <div className="flex-1 min-w-0">
+                                                <span className="font-semibold">Tema:</span>
+                                                <span className="ml-2 truncate" title={topic}>{topic}</span>
+                                            </div>
+                                            <div className="text-right">
+                                                <span className="font-semibold">Pontuação:</span>
+                                                <span className="ml-2 font-bold text-xl text-blue-600">{score}/{questions.length}</span>
+                                                <span className="ml-1 text-sm">({questions.length > 0 ? Math.round((score / questions.length) * 100) : 0}%)</span>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                                <div className="p-6 space-y-6">
-                                    {questions.map((q, index) => {
-                                        const userAnswer = userAnswers[index];
-                                        return (
-                                            <div key={index} className="p-5 rounded-lg border border-gray-200 shadow-sm report-item bg-white">
-                                                <p className="font-bold text-lg text-gray-800 mb-3">{index + 1}. {q.question}</p>
-                                                <div className={`flex items-start gap-3 p-3 rounded-md ${userAnswer.isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'} border`}>
-                                                    {userAnswer.isCorrect ? <CheckIcon className="h-5 w-5 text-green-600 mt-1 flex-shrink-0"/> : <XIcon className="h-5 w-5 text-red-600 mt-1 flex-shrink-0"/>}
-                                                    <div>
-                                                        <p className="font-semibold text-gray-700">Sua resposta:</p>
-                                                        <p className="text-gray-600">{userAnswer.answer}</p>
-                                                    </div>
-                                                </div>
-                                                {!userAnswer.isCorrect && (
-                                                    <div className="flex items-start gap-3 mt-2 p-3 rounded-md bg-gray-50 border border-gray-200">
-                                                        <CheckIcon className="h-5 w-5 text-gray-500 mt-1 flex-shrink-0"/>
+                                    <div className="p-6 space-y-6">
+                                        {questions.map((q, index) => {
+                                            const userAnswer = userAnswers[index];
+                                            return (
+                                                <div key={index} className="p-5 rounded-lg border border-gray-200 shadow-sm report-item bg-white">
+                                                    <p className="font-bold text-lg text-gray-800 mb-3">{index + 1}. {q.question}</p>
+                                                    <div className={`flex items-start gap-3 p-3 rounded-md ${userAnswer.isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'} border`}>
+                                                        {userAnswer.isCorrect ? <CheckIcon className="h-5 w-5 text-green-600 mt-1 flex-shrink-0"/> : <XIcon className="h-5 w-5 text-red-600 mt-1 flex-shrink-0"/>}
                                                         <div>
-                                                            <p className="font-semibold text-gray-700">Resposta correta:</p>
-                                                            <p className="text-gray-600">{q.answer}</p>
+                                                            <p className="font-semibold text-gray-700">Sua resposta:</p>
+                                                            <p className="text-gray-600">{userAnswer.answer}</p>
                                                         </div>
                                                     </div>
-                                                )}
-                                                <div className="mt-4 pt-3 border-t border-gray-200">
-                                                    <p className="text-sm text-gray-700"><span className="font-semibold">Resumo:</span> {q.explanation}</p>
+                                                    {!userAnswer.isCorrect && (
+                                                        <div className="flex items-start gap-3 mt-2 p-3 rounded-md bg-gray-50 border border-gray-200">
+                                                            <CheckIcon className="h-5 w-5 text-gray-500 mt-1 flex-shrink-0"/>
+                                                            <div>
+                                                                <p className="font-semibold text-gray-700">Resposta correta:</p>
+                                                                <p className="text-gray-600">{q.answer}</p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    <div className="mt-4 pt-3 border-t border-gray-200">
+                                                        <p className="text-sm text-gray-700"><span className="font-semibold">Resumo:</span> {q.explanation}</p>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        );
-                                    })}
+                                            );
+                                        })}
+                                    </div>
                                 </div>
-                                <div className="text-center text-xs text-gray-400 p-4 border-t border-gray-100">
-                                    <p>Relatório gerado em: {new Date().toLocaleString('pt-BR')}</p>
-                                    <p>Portal de Questões IA</p>
+                                <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
+                                    <button onClick={handleDownloadPdf} disabled={isDownloading} className="px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition-colors disabled:bg-gray-400">
+                                      {isDownloading ? 'Baixando...' : 'Baixar Relatório (PDF)'}
+                                    </button>
+                                    <button onClick={restartQuiz} className="px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-lg shadow-md hover:bg-gray-300 transition-colors">Voltar ao Início</button>
                                 </div>
-                            </div>
-                            <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
-                                <button onClick={handleDownloadPdf} disabled={isDownloading} className="px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition-colors disabled:bg-gray-400">
-                                  {isDownloading ? 'Baixando...' : 'Baixar Relatório (PDF)'}
-                                </button>
-                                <button onClick={startQuiz} className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition-colors">Gerar Novas Questões</button>
-                                <button onClick={restartQuiz} className="px-6 py-3 bg-gray-200 text-gray-800 font-semibold rounded-lg shadow-md hover:bg-gray-300 transition-colors">Voltar ao Início</button>
-                            </div>
-                        </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        }
+                           </div>
+                        )}
 
-        // Renderiza o componente App na div com id 'root'
+                      </>
+                    )}
+                  </div>
+                </div>
+            );
+        }
+        
         const container = document.getElementById('root');
         const root = ReactDOM.createRoot(container);
         root.render(<App />);
