@@ -288,7 +288,6 @@
                 }
             };
 
-
             return (
                 <div className="min-h-screen font-sans flex items-center justify-center p-4">
                   <div className="w-full max-w-3xl mx-auto bg-white rounded-2xl shadow-lg p-6 md:p-8 transition-all duration-500">
@@ -311,7 +310,13 @@
                                     <button onClick={() => setInputType('file')} className={`flex-1 py-2 font-semibold ${inputType === 'file' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Enviar Arquivo</button>
                                 </div>
                                 {inputType === 'topic' ? ( <div className="mb-4"><input type="text" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Digite o tema aqui..." className="w-full p-3 border-2 rounded-lg" /></div> ) 
-                                : ( <div className="mb-4"><label htmlFor="file-upload" className="cursor-pointer w-full p-3 border-2 border-dashed rounded-lg flex justify-center items-center"><FileIcon /><span className="text-gray-600">{file ? file.name : 'Clique para escolher um arquivo'}</span></label><input id="file-upload" type="file" className="sr-only" onChange={(e) => setFile(e.target.files[0])} /></div> )}
+                                : ( 
+                                    <div className="mb-4">
+                                        <label htmlFor="file-upload" className="cursor-pointer w-full p-3 border-2 border-dashed rounded-lg flex justify-center items-center"><FileIcon /><span className="text-gray-600">{file ? file.name : 'Clique para escolher um arquivo'}</span></label>
+                                        <input id="file-upload" type="file" className="sr-only" onChange={(e) => setFile(e.target.files[0])} accept=".pdf, .png, .jpg, .jpeg, .webp"/>
+                                        <p className="text-xs text-gray-500 mt-1">Suportado: PDF, PNG, JPG, WEBP.</p>
+                                    </div>
+                                 )}
                                 <div className={`grid grid-cols-1 sm:grid-cols-${quizMode === 'practice' ? 2 : 3} gap-4 mb-6 text-left`}>
                                     <div>
                                         <label className="block text-sm font-medium">Dificuldade</label>
@@ -438,3 +443,4 @@
     </script>
 </body>
 </html>
+
