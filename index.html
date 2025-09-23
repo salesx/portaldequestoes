@@ -212,7 +212,7 @@
                     setSelectedAnswer(userAnswers[currentQuestionIndex + 1]?.answer || null); 
                     setIsAnswered(false); 
                 } else { 
-                    if (quizMode === 'practice') setGameState('finished'); 
+                    finishTest();
                 } 
             };
             
